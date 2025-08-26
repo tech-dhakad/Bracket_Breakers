@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Flask To-Do List</title>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; margin-top: 50px; }
+        input, button { padding: 10px; margin: 5px; }
+        ul { list-style-type: none; padding: 0; }
+        li { margin: 10px 0; }
+        form { display: inline; }
+    </style>
+</head>
+<body>
+    <h1>To-Do List</h1>
+    <form method="POST">
+        <input type="text" name="task" placeholder="Enter task">
+        <button type="submit" name="add">Add</button>
+    </form>
+
+    <ul>
+        {% for task in tasks %}
+        <li>
+            {{ task }}
+            <form method="POST" style="display:inline;">
+                <button type="submit" name="remove" value="{{ loop.index0 }}">❌</button>
+            </form>
+        </li>
+        {% endfor %}
+    </ul>
+</body>
+</html>
