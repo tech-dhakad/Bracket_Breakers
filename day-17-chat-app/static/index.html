@@ -1,0 +1,194 @@
+<!-- static/index.html -->
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Mini Chat App (Socket.IO)</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body { font-family: system-ui, Arial; margin: 0; padding: 0; display:flex; height:100vh; }
+    .sidebar { width:260px; border-right:1px solid #eee; padding:12px; box-sizing:border-box; }
+    .main { flex:1; display:flex; flex-direction:column; }
+    .messages { flex:1; padding:12px; overflow:auto; background:#fafafa; }
+    .composer { padding:12px; border-top:1px solid #eee; display:flex; gap:8px; }
+    .input { flex:1; padding:8px; font-size:14px; }
+    .btn { padding:8px 12px; }
+    .msg { margin-bottom:10px; }
+    .meta { font-size:12px; color:#666; }
+    .typing { font-style: italic; color:#333; padding:6px 12px; }
+    .user { padding:6px 8px; border-radius:6px; margin-bottom:6px; background:#f2f2f2;}
+  </style>
+  <!-- Socket.IO client from CDN -->
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"
+    integrity="sha384-..." crossorigin="anonymous"></script>
+</head>
+<body>
+  <div class="sidebar">
+    <h3>Mini Chat</h3>
+    <div id="loginBox">
+      <input id="username" placeholder="Enter username" style="width:100%;padding:8px;margin-bottom:8px;" />
+      <input id="room" placeholder="Room (global)" style="width:100%;padding:8px;margin-bottom:8px;" />
+      <button id="btnLogin" class="btn" style="width:100%;">Join Chat</button>
+    </div>
+
+    <hr/>
+    <h4>Online</h4>
+    <div id="users"></div>
+
+    <hr/>
+    <h4>Rooms</h4>
+    <button class="btn" onclick="joinRoom('global')">global</button>
+    <button class="btn" onclick="joinRoom('friends')">friends</button>
+  </div>
+
+  <div class="main">
+    <div style="padding:12px;border-bottom:1px solid #eee;">
+      <span id="status">Not connected</span>
+      <span style="float:right" id="currentRoom"></span>
+    </div>
+
+    <div class="messages" id="messages"></div>
+    <div id="typing" class="typing" style="display:none"></div>
+
+    <div class="composer">
+      <input id="text" class="input" autocomplete="off" placeholder="Type a message..." />
+      <button id="sendBtn" class="btn">Send</button>
+    </div>
+  </div>
+
+<script>
+  const socket = io(); // connects to same host
+  let myUsername = null;
+  let currentRoom = "global";
+  let typingTimer = null;
+
+  const messagesEl = document.getElementById("messages");
+  const usersEl = document.getElementById("users");
+  const typingEl = document.getElementById("typing");
+  const statusEl = document.getElementById("status");
+  const roomSpan = document.getElementById("currentRoom");
+
+  function addMessage(m) {
+    const div = document.createElement("div");
+    div.className = "msg";
+    div.innerHTML = `<div class="meta"><strong>${m.username}</strong> • ${new Date(m.ts).toLocaleTimeString()}</div><div>${escapeHtml(m.text)}</div>`;
+    messagesEl.appendChild(div);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  function showUsers(list) {
+    usersEl.innerHTML = "";
+    list.forEach(u => {
+      const d = document.createElement("div");
+      d.className = "user";
+      d.textContent = u;
+      usersEl.appendChild(d);
+    });
+  }
+
+  function joinRoom(r) {
+    if (!myUsername) {
+      alert("Login first");
+      return;
+    }
+    socket.emit("join_room", {room: r});
+  }
+
+  function escapeHtml(s) {
+    return s.replaceAll("&", "&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;");
+  }
+
+  // Socket handlers
+  socket.on("connect", () => {
+    statusEl.textContent = "Connected to server";
+  });
+
+  socket.on("connected", (d) => {
+    console.log("connected event:", d);
+  });
+
+  socket.on("login_success", (data) => {
+    myUsername = data.username;
+    currentRoom = data.room || "global";
+    roomSpan.textContent = "Room: " + currentRoom;
+    document.getElementById("loginBox").style.display = "none";
+    statusEl.textContent = "Logged in as " + myUsername;
+    showUsers(data.users || []);
+    // load history
+    messagesEl.innerHTML = "";
+    (data.messages || []).forEach(m => addMessage(m));
+  });
+
+  socket.on("user_joined", (d) => {
+    const note = {username: "System", text: `${d.username} joined`, ts: d.ts};
+    addMessage(note);
+    // request user list update (server broadcasts)
+  });
+
+  socket.on("user_left", (d) => {
+    const note = {username: "System", text: `${d.username} left`, ts: d.ts};
+    addMessage(note);
+  });
+
+  socket.on("user_changed_room", (d) => {
+    const note = {username:"System", text: `${d.username} moved to ${d.room}`, ts: new Date().toISOString()};
+    addMessage(note);
+  });
+
+  socket.on("new_message", (msg) => {
+    addMessage(msg);
+  });
+
+  socket.on("joined_room", (d) => {
+    currentRoom = d.room;
+    roomSpan.textContent = "Room: " + currentRoom;
+    messagesEl.innerHTML = ""; // client will get messages through login or server could emit messages list on join; simple demo clears
+    addMessage({username:"System", text: `Joined ${currentRoom}`, ts: new Date().toISOString()});
+  });
+
+  socket.on("user_typing", (d) => {
+    if (d.typing) {
+      typingEl.style.display = "block";
+      typingEl.textContent = `${d.username} is typing...`;
+    } else {
+      typingEl.style.display = "none";
+    }
+  });
+
+  // Simple users list update (server broadcasts user list via 'user_list' event is optional)
+  socket.on("user_list", (data) => {
+    showUsers(data.users || []);
+  });
+
+  // UI events
+  document.getElementById("btnLogin").addEventListener("click", () => {
+    const uname = document.getElementById("username").value.trim();
+    const room = document.getElementById("room").value.trim() || "global";
+    if (!uname) { alert("Enter a username"); return; }
+    socket.emit("set_username", {username: uname, room});
+  });
+
+  document.getElementById("sendBtn").addEventListener("click", sendMessage);
+  document.getElementById("text").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); sendMessage(); }
+    // typing indicator
+    socket.emit("typing", {typing: true});
+    if (typingTimer) clearTimeout(typingTimer);
+    typingTimer = setTimeout(() => {
+      socket.emit("typing", {typing: false});
+    }, 900);
+  });
+
+  function sendMessage(){
+    const t = document.getElementById("text");
+    const val = t.value.trim();
+    if (!val) return;
+    socket.emit("send_message", {text: val});
+    // add local echo (optional; server will broadcast back too)
+    // addMessage({username: myUsername, text: val, ts: new Date().toISOString()});
+    t.value = "";
+    socket.emit("typing", {typing:false});
+  }
+</script>
+</body>
+</html>
